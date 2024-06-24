@@ -10,10 +10,14 @@ Original file is located at
 !pip install openai
 !pip install yfinance
 !pip install mplfinance
-import mplfinance as mpf
+!pip install backtesting
+
 from openai import OpenAI, OpenAIError
+from backtesting import Backtest, Strategy
+from backtesting.lib import crossover
+import mplfinance as mpf
 import yfinance as yf
-import pandas as pd #
+import pandas as pd
 import datetime as dt
 
 stock_id = "META"
@@ -35,6 +39,28 @@ def get_reply(messages):
     reply = f"發生 {err.type} 錯誤\n{err.message}"
   return reply
 def ai_helper(StockData, user_msg):
+  msg = [{"role":"system","content":
+      f"I require your assistance in generating Python code based on specific user requirements.\
+      Your need to carefully analyze user's requirements and generate the Python code.\
+      I will provide you with a dataframe (StockData) that follows the format {StockData.columns}.\
+      Please note that your response should solely consist of the code itself,and no additional information should be included."},
+      {"role":"user","content":
+      f"The user requirement:{user_msg} \n\
+      Your task is to develop a Python function named \
+      'calculate(StockData)'. This function should accept a dataframe as \
+      its parameter. Ensure that you only utilize the columns \
+      present in the dataset, specifically {StockData.columns}. \
+      After processing, the function should return the processed \
+      dataframe. Your response should strictly contain the Python \
+      code for the 'calculate(StockData)' function \
+      and exclude any unrelated content."
+      }]
+  reply_data = get_reply(msg)
+  cleaned_code = reply_data.replace("```","")
+  cleaned_code = cleaned_code.replace("python","")
+
+  return cleaned_code
+def ai_helper_strategy(StockData, user_msg):
   msg = [{"role":"system","content":
       f"I require your assistance in generating Python code based on specific user requirements.\
       Your need to carefully analyze user's requirements and generate the Python code.\
@@ -79,3 +105,36 @@ mpf.make_addplot(kplot_StockData['Lower_Band'], color='red',alpha=0.5, linestyle
 mpf.make_addplot(kplot_StockData['Volume'], panel=1, type='bar',color='g', alpha=0.5, ylabel='Volume'),
 mpf.make_addplot(kplot_StockData['MACD_Histogram'], panel=2, type='bar',color='r', alpha=0.5, ylabel='MACD')]
 mpf.plot(kplot_StockData, type='candle', addplot=ap,style=my_style, title=f'{stock_id}')
+
+"""BackTest your Strategy"""
+
+class CrossStrategy(Strategy):
+  def init(self):
+    super().init()
+
+  def next(self):
+    if crossover(self.data.ma1, self.data.ma2):
+      self.buy(size=1)
+    elif crossover(self.data.ma2, self.data.ma1):
+      self.sell(size=1)
+
+df = yf.download(stock_id, period="1y")
+
+df['ma1'] = df['Close'].rolling(window=5).mean()
+df['ma2'] = df['Close'].rolling(window=10).mean()
+df.head()
+
+backtest = Backtest(df,
+        CrossStrategy,
+        cash=100000, # starting fund
+        commission=0.004,
+        margin=1, # leverage
+        hedging=False,
+        trade_on_close=False,
+        exclusive_orders=False,
+        )
+stats = backtest.run()
+
+print(stats)
+# detailed trading record
+stats["_trades"].head()
